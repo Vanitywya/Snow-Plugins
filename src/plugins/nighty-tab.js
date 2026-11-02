@@ -4,7 +4,6 @@ import { ui } from '../runtime.js';
 import { registerSection } from '../settings-section.js';
 import { patchLazySheet } from '../action-sheet.js';
 import { blueIcon, grayIcon } from './nighty-icon.js';
-import { createNightySession, nightyOrigin } from './nighty-session.js';
 
 export function pageUrl(value) {
     try {
@@ -155,6 +154,45 @@ export default function NightyTab(r) {
             } });
         } finally { sending.delete(message.id); }
     }
+    function pageHost() {
+        try {
+            const url = new URL(String(store.url).trim());
+            return url.protocol === 'https:' && !url.username && !url.password && !/(^|\.)discord(?:app)?\.(?:com|net)$/i.test(url.hostname) ? url.origin : '';
+        } catch { return ''; }
+    }
+    function cleanToken(value) {
+        if (typeof value !== 'string') return '';
+        const token = value.trim();
+        if (token.length < 8 || token.length > 4096 || !/^[\w.~+/-]+=*$/.test(token)) return '';
+        return token;
+    }
+    function sessionToken() {
+        const host = pageHost();
+        const saved = store.sessions?.[host];
+        return host && cleanToken(saved) ? cleanToken(saved) : '';
+    }
+    // The Nighty page keeps its own access_token. Discord cookies stay out of this WebView.
+    function sessionScript(token) {
+        return '(' + "function(config) {\n    if (!config.origin || window.top !== window.self || location.origin !== config.origin || window.__mimeNightyCookieV3) return true;\n    window.__mimeNightyCookieV3 = true;\n    const valid = value => typeof value === 'string' && value.length >= 8 && value.length <= 4096 && /^[\\w.~+/-]+=*$/.test(value) ? value : '';\n    let blocked = false, last = '', lastLocal = '', lastCookie = '', revision = 0, timer;\n    try { blocked = sessionStorage.getItem('__mimeNightyLogout') === '1'; } catch {}\n    const emit = (token = '', logout = false) => window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'NIGHTY_TOKEN', origin: config.origin, token, logout }));\n    const local = () => { try { return valid(localStorage.getItem('access_token')); } catch { return ''; } };\n    const cookie = () => { try { const value = document.cookie.split(';').map(v => v.trim()).find(v => v.startsWith('access_token=')); return value ? valid(decodeURIComponent(value.slice(13))) : ''; } catch { return ''; } };\n    const setCookie = value => { try { document.cookie = 'access_token=' + encodeURIComponent(value) + '; Path=/; Max-Age=' + (value ? '2592000' : '0') + '; SameSite=Lax; Secure'; } catch {} };\n    const clear = (erase = true) => {\n        blocked = true; last = ''; revision += 1;\n        try { sessionStorage.setItem('__mimeNightyLogout', '1'); } catch {}\n        if (erase) { try { localStorage.removeItem('access_token'); } catch {} setCookie(''); }\n        emit('', true);\n    };\n    const save = value => {\n        value = valid(value);\n        if (!value) return;\n        blocked = false; revision += 1;\n        try { sessionStorage.removeItem('__mimeNightyLogout'); } catch {}\n        try { if (local() !== value) localStorage.setItem('access_token', value); } catch {}\n        if (cookie() !== value) setCookie(value);\n        lastLocal = local(); lastCookie = cookie();\n        if (last !== value) { last = value; emit(value); }\n    };\n    if (blocked) clear();\n    else save(local() || cookie() || valid(config.token));\n    try {\n        const proto = Object.getPrototypeOf(localStorage), set = proto.setItem, remove = proto.removeItem, empty = proto.clear;\n        proto.setItem = function(key, value) { const result = set.apply(this, arguments); if (this === localStorage && String(key) === 'access_token') { if (valid(String(value))) save(String(value)); else clear(); } return result; };\n        proto.removeItem = function(key) { const result = remove.apply(this, arguments); if (this === localStorage && String(key) === 'access_token' && !blocked) clear(); return result; };\n        proto.clear = function() { const result = empty.apply(this, arguments); if (this === localStorage && !blocked) clear(); return result; };\n    } catch {}\n    const poll = () => {\n        if (blocked || location.origin !== config.origin) return;\n        const l = local(), c = cookie();\n        if ((lastLocal && !l) || (lastCookie && !c)) { clear(); return; }\n        const next = l && l !== lastLocal ? l : c && c !== lastCookie ? c : l || c;\n        lastLocal = l; lastCookie = c;\n        if (next && next !== last) save(next);\n    };\n    const endpoint = value => { try { const url = new URL(typeof value === 'string' ? value : value?.url || '', location.href); return url.origin === config.origin ? url.pathname : ''; } catch { return ''; } };\n    const logout = value => /\\/(?:logout|log-out|signout|sign-out)(?:\\/|$)/i.test(value);\n    const login = value => /\\/(?:login|log-in|signin|sign-in)(?:\\/|$)/i.test(value);\n    const receive = (path, data, started) => { if (revision === started && (!blocked || login(path))) save(data?.access_token); };\n    if (typeof window.fetch === 'function') {\n        const original = window.fetch;\n        window.fetch = function(input) {\n            const path = endpoint(input); if (logout(path)) clear(false); const started = revision;\n            return original.apply(this, arguments).then(response => {\n                if (logout(path)) clear();\n                else if (path && response.ok && response.clone && (!response.url || endpoint(response.url))) response.clone().json().then(data => receive(path, data, started)).catch(() => {});\n                return response;\n            }, error => { if (logout(path)) clear(); throw error; });\n        };\n    }\n    if (window.XMLHttpRequest?.prototype) {\n        const proto = window.XMLHttpRequest.prototype, open = proto.open, send = proto.send, paths = new WeakMap();\n        proto.open = function(method, url) { paths.set(this, endpoint(url)); return open.apply(this, arguments); };\n        proto.send = function() {\n            const path = paths.get(this) || ''; if (logout(path)) clear(false); const started = revision;\n            if (logout(path)) this.addEventListener('loadend', () => clear(), { once: true });\n            else if (path) this.addEventListener('load', () => { if (this.status >= 200 && this.status < 300 && (!this.responseURL || endpoint(this.responseURL))) { try { receive(path, this.responseType === 'json' ? this.response : JSON.parse(this.responseText), started); } catch {} } }, { once: true });\n            return send.apply(this, arguments);\n        };\n    }\n    window.addEventListener('storage', event => { if (event.storageArea === localStorage && (event.key === null || event.key === 'access_token')) { if (!valid(event.newValue)) clear(); else save(event.newValue); } });\n    document.addEventListener('click', event => { const link = event.target?.closest?.('a[href]'); if (link && logout(endpoint(link.href))) clear(false); }, true);\n    document.addEventListener('submit', event => { if (logout(endpoint(event.target?.action))) clear(false); }, true);\n    const start = () => { if (!timer) timer = setInterval(poll, 1000); };\n    window.addEventListener('pagehide', () => { poll(); clearInterval(timer); timer = undefined; });\n    window.addEventListener('pageshow', start); start(); return true;\n}" + ')(' + JSON.stringify({ origin: pageHost(), token: cleanToken(token) }) + ');true;';
+    }
+    function onSessionMessage(event) {
+        if (!r.active) return;
+        const origin = pageHost();
+        if (!origin) return;
+        const native = event?.nativeEvent;
+        try { if (new URL(native?.url).origin !== origin) return; } catch { return; }
+        if (typeof native?.data !== 'string' || native.data.length > 8192) return;
+        let data;
+        try { data = JSON.parse(native.data); } catch { return; }
+        if (data?.type !== 'NIGHTY_TOKEN' || data.origin !== origin) return;
+        const token = cleanToken(data.token);
+        if (!data.logout && !token) return;
+        const current = store.sessions && typeof store.sessions === 'object' ? { ...store.sessions } : {};
+        delete current[new URL(origin).host];
+        if (data.logout) delete current[origin];
+        else current[origin] = token;
+        r.set('sessions', current);
+    }
     function readInset(edge) {
         try {
             const mod = r.find('initialWindowMetrics') || r.find('useSafeAreaInsets') || {};
@@ -164,40 +202,31 @@ export default function NightyTab(r) {
         } catch { /* The navigator already keeps the page on screen when no inset is published. */ }
         return 0;
     }
-    const openSessions = new Set();
-    r.own(() => { for (const session of openSessions) session.dispose(); openSessions.clear(); });
     function NightyPage() {
         r.useRefresh();
         const src = pageUrl(store.url);
         const WebView = r.find('WebView')?.WebView || r.byName('WebView');
         const [error, setError] = React.useState('');
-        const session = React.useMemo(() => createNightySession(r, src), [src]);
-        React.useEffect(() => {
-            openSessions.add(session);
-            return () => { openSessions.delete(session); session.dispose(); };
-        }, [session]);
-        if (!r.active) return null;
         // The navigator already places this under the header. A window-height frame paints past the bottom of the screen.
         const frame = { flex: 1, width: '100%', paddingBottom: readInset('bottom') };
         // about:blank is the WebView's first load; blocking it leaves the page empty on iOS.
         const allow = req => {
             const url = req?.url || '';
-            return !url || url === 'about:blank' || (!!session.origin && nightyOrigin(url) === session.origin);
+            return !url || url === 'about:blank' || url === src || !!pageUrl(url);
         };
         return h(RN.View, { style: frame },
-            !src || !session.origin ? h(Text, null, 'Set an HTTPS Nighty URL in settings. Discord domains are not allowed.')
+            !src ? h(Text, null, 'Set a valid HTTP or HTTPS URL in Nighty Tab settings.')
                 : !WebView ? h(Text, null, 'WebView is unavailable in this Snow build.')
                     : h(WebView, {
-                        key: src, source: { uri: src },
+                        key: src, source: { uri: src, ...(sessionToken() ? { headers: {} } : {}) },
                         style: { flex: 1, width: '100%' },
                         originWhitelist: ['http://*', 'https://*'], javaScriptEnabled: true, domStorageEnabled: true,
                         sharedCookiesEnabled: false, thirdPartyCookiesEnabled: false, incognito: false, startInLoadingState: true,
-                        injectedJavaScriptBeforeContentLoaded: session.script,
-                        injectedJavaScriptBeforeContentLoadedForMainFrameOnly: true,
-                        injectedJavaScriptForMainFrameOnly: true,
-                        onMessage: session.onMessage,
+                        injectedJavaScriptBeforeContentLoaded: sessionScript(sessionToken()),
+                        injectedJavaScript: sessionScript(sessionToken()),
+                        onMessage: onSessionMessage,
                         onShouldStartLoadWithRequest: allow,
-                        onError: () => setError('Could not load Nighty.'),
+                        onError: event => setError(event.nativeEvent?.description || 'Could not load Nighty.'),
                         onHttpError: event => setError(`Nighty returned HTTP ${event.nativeEvent?.statusCode}.`),
                         onLoad: () => setError(''),
                     }),
@@ -207,8 +236,7 @@ export default function NightyTab(r) {
         r.useRefresh();
         return h(Page, { title: 'Nighty Tab', close },
             h(Text, null, 'URL'), h(Input, { value: store.url, placeholder: 'https://', autoCapitalize: 'none', onChange: v => r.set('url', v) }),
-            store.url && !nightyOrigin(store.url) ? h(Text, null, 'Enter an HTTPS Nighty URL without embedded credentials. Discord domains are not allowed.') : null,
-            h(Text, { muted: true }, 'Nighty sessions are saved locally in plugin storage, not an encrypted credential vault. External-site navigation is blocked.'),
+            store.url && !pageUrl(store.url) ? h(Text, null, 'Enter an HTTP or HTTPS URL without embedded credentials.') : null,
             h(Button, { text: 'Open Nighty', onPress: () => { if (!openNighty()) openSheet(); } }),
             h(Toggle, { setting: 'showNightyButton', label: 'Profile Nighty button', subLabel: 'Adds a Nighty button beside Settings on your profile. It uses the same icon as the Nighty settings row.' }),
             h(Toggle, { setting: 'scriptUtils', label: 'Script Utils functions', subLabel: 'Download Script replies to an attachment with your prefix followed by dls.' }),
@@ -400,4 +428,4 @@ export default function NightyTab(r) {
         r.status.profileButton = patched === false ? 'unavailable' : (r.status.profileButton === 'replaced' ? 'replaced' : 'patched');
     } };
 }
-NightyTab.defaults = { url: '', scriptUtils: false, nightyPrefix: '.', iconType: 'blue', customIconUrl: '', showNightyButton: true, sessions: {}, nightySessionsV2: {} };
+NightyTab.defaults = { url: '', scriptUtils: false, nightyPrefix: '.', iconType: 'blue', customIconUrl: '', showNightyButton: true, sessions: {} };

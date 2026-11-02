@@ -2,10 +2,10 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.nightytab",
-  "version": "1.7.1-dev.1",
+  "version": "1.14.1",
   "display": {
     "name": "Nighty Tab",
-    "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.",
+    "description": "Open Nighty from Discord mobile settings or the profile action bar.",
     "authors": [
       {
         "name": "Mime | N0_.q3",
@@ -20,7 +20,7 @@
   "main": "index.js",
   "extras": {
     "license": "GPL-3.0-or-later",
-    "source": "https://github.com/xMimiez/Snow-Plugins/tree/dev/NightyTab",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab",
     "bunny": {}
   }
 }
