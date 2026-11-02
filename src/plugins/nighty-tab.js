@@ -4,6 +4,7 @@ import { ui } from '../runtime.js';
 import { registerSection } from '../settings-section.js';
 import { patchLazySheet } from '../action-sheet.js';
 import { blueIcon, grayIcon } from './nighty-icon.js';
+import { createNightySession, nightyOrigin } from './nighty-session.js';
 
 export function pageUrl(value) {
     try {
@@ -154,40 +155,6 @@ export default function NightyTab(r) {
             } });
         } finally { sending.delete(message.id); }
     }
-    function pageHost() {
-        const src = pageUrl(store.url);
-        if (!src) return '';
-        try { return new URL(src).host; } catch { return ''; }
-    }
-    function cleanToken(value) {
-        if (typeof value !== 'string') return '';
-        const token = value.trim();
-        if (token.length < 8 || token.length > 4096 || !/^[\w.~+/-]+=*$/.test(token)) return '';
-        return token;
-    }
-    function sessionToken() {
-        const host = pageHost();
-        const saved = store.sessions?.[host];
-        return host && cleanToken(saved) ? cleanToken(saved) : '';
-    }
-    // The Nighty page keeps its own access_token. Discord cookies stay out of this WebView.
-    function sessionScript(token) {
-        const saved = JSON.stringify(cleanToken(token) || '');
-        return `(() => { try { var saved = ${saved}; if (saved) { var secure = location.protocol === 'https:' ? '; Secure' : ''; document.cookie = 'access_token=' + saved + '; Path=/; Max-Age=2592000; SameSite=Lax' + secure; try { localStorage.setItem('access_token', saved); } catch (e) {} } if (window.__mimeNightySession) return true; window.__mimeNightySession = true; var send = function (value) { if (typeof value !== 'string' || !value || !window.ReactNativeWebView) return; window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'NIGHTY_TOKEN', token: value })); }; var orig = window.fetch; if (typeof orig === 'function') { window.fetch = function () { var args = arguments; return Promise.resolve(orig.apply(this, args)).then(function (res) { try { var first = args[0]; var url = typeof first === 'string' ? first : (first && first.url) || ''; if (String(url).indexOf('/api/login') !== -1 && res && res.clone) res.clone().json().then(function (data) { if (data && typeof data.access_token === 'string') send(data.access_token); }).catch(function () {}); } catch (e) {} return res; }); }; } } catch (e) {} return true; })();`;
-    }
-    function onSessionMessage(event) {
-        if (!r.active) return;
-        const host = pageHost();
-        if (!host) return;
-        let data;
-        try { data = JSON.parse(event?.nativeEvent?.data || ''); } catch { return; }
-        if (data?.type !== 'NIGHTY_TOKEN') return;
-        const token = cleanToken(data.token);
-        if (!token) return;
-        const current = store.sessions && typeof store.sessions === 'object' ? store.sessions : {};
-        if (current[host] === token) return;
-        r.set('sessions', { ...current, [host]: token });
-    }
     function readInset(edge) {
         try {
             const mod = r.find('initialWindowMetrics') || r.find('useSafeAreaInsets') || {};
@@ -197,31 +164,40 @@ export default function NightyTab(r) {
         } catch { /* The navigator already keeps the page on screen when no inset is published. */ }
         return 0;
     }
+    const openSessions = new Set();
+    r.own(() => { for (const session of openSessions) session.dispose(); openSessions.clear(); });
     function NightyPage() {
         r.useRefresh();
         const src = pageUrl(store.url);
         const WebView = r.find('WebView')?.WebView || r.byName('WebView');
         const [error, setError] = React.useState('');
+        const session = React.useMemo(() => createNightySession(r, src), [src]);
+        React.useEffect(() => {
+            openSessions.add(session);
+            return () => { openSessions.delete(session); session.dispose(); };
+        }, [session]);
+        if (!r.active) return null;
         // The navigator already places this under the header. A window-height frame paints past the bottom of the screen.
         const frame = { flex: 1, width: '100%', paddingBottom: readInset('bottom') };
         // about:blank is the WebView's first load; blocking it leaves the page empty on iOS.
         const allow = req => {
             const url = req?.url || '';
-            return !url || url === 'about:blank' || url === src || !!pageUrl(url);
+            return !url || url === 'about:blank' || (!!session.origin && nightyOrigin(url) === session.origin);
         };
         return h(RN.View, { style: frame },
-            !src ? h(Text, null, 'Set a valid HTTP or HTTPS URL in Nighty Tab settings.')
+            !src || !session.origin ? h(Text, null, 'Set an HTTPS Nighty URL in settings. Discord domains are not allowed.')
                 : !WebView ? h(Text, null, 'WebView is unavailable in this Snow build.')
                     : h(WebView, {
-                        key: src, source: { uri: src, ...(sessionToken() ? { headers: { Cookie: `access_token=${sessionToken()}` } } : {}) },
+                        key: src, source: { uri: src },
                         style: { flex: 1, width: '100%' },
                         originWhitelist: ['http://*', 'https://*'], javaScriptEnabled: true, domStorageEnabled: true,
                         sharedCookiesEnabled: false, thirdPartyCookiesEnabled: false, incognito: false, startInLoadingState: true,
-                        injectedJavaScriptBeforeContentLoaded: sessionScript(sessionToken()),
-                        injectedJavaScript: sessionScript(sessionToken()),
-                        onMessage: onSessionMessage,
+                        injectedJavaScriptBeforeContentLoaded: session.script,
+                        injectedJavaScriptBeforeContentLoadedForMainFrameOnly: true,
+                        injectedJavaScriptForMainFrameOnly: true,
+                        onMessage: session.onMessage,
                         onShouldStartLoadWithRequest: allow,
-                        onError: event => setError(event.nativeEvent?.description || 'Could not load Nighty.'),
+                        onError: () => setError('Could not load Nighty.'),
                         onHttpError: event => setError(`Nighty returned HTTP ${event.nativeEvent?.statusCode}.`),
                         onLoad: () => setError(''),
                     }),
@@ -231,7 +207,8 @@ export default function NightyTab(r) {
         r.useRefresh();
         return h(Page, { title: 'Nighty Tab', close },
             h(Text, null, 'URL'), h(Input, { value: store.url, placeholder: 'https://', autoCapitalize: 'none', onChange: v => r.set('url', v) }),
-            store.url && !pageUrl(store.url) ? h(Text, null, 'Enter an HTTP or HTTPS URL without embedded credentials.') : null,
+            store.url && !nightyOrigin(store.url) ? h(Text, null, 'Enter an HTTPS Nighty URL without embedded credentials. Discord domains are not allowed.') : null,
+            h(Text, { muted: true }, 'Nighty sessions are saved locally in plugin storage, not an encrypted credential vault. External-site navigation is blocked.'),
             h(Button, { text: 'Open Nighty', onPress: () => { if (!openNighty()) openSheet(); } }),
             h(Toggle, { setting: 'showNightyButton', label: 'Profile Nighty button', subLabel: 'Adds a Nighty button beside Settings on your profile. It uses the same icon as the Nighty settings row.' }),
             h(Toggle, { setting: 'scriptUtils', label: 'Script Utils functions', subLabel: 'Download Script replies to an attachment with your prefix followed by dls.' }),
@@ -423,4 +400,4 @@ export default function NightyTab(r) {
         r.status.profileButton = patched === false ? 'unavailable' : (r.status.profileButton === 'replaced' ? 'replaced' : 'patched');
     } };
 }
-NightyTab.defaults = { url: '', scriptUtils: false, nightyPrefix: '.', iconType: 'blue', customIconUrl: '', showNightyButton: true, sessions: {} };
+NightyTab.defaults = { url: '', scriptUtils: false, nightyPrefix: '.', iconType: 'blue', customIconUrl: '', showNightyButton: true, sessions: {}, nightySessionsV2: {} };
