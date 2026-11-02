@@ -1,4 +1,4 @@
-name: NightyTab dev session update
+name: NightyTab cookie-only dev update
 on:
   push:
     branches: [dev]
@@ -19,21 +19,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: dev
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
       - run: node scripts/update-nighty-session.mjs
-      - run: node --check src/plugins/nighty-tab.js && node --check src/plugins/nighty-session.js
-      - run: npm ci
-      - run: npm run build
-      - name: Commit NightyTab changes to dev only
+      - run: node --check src/plugins/nighty-tab.js && node --check NightyTab/index.js
+      - name: Commit main UI baseline with cookie-only patch to dev
         run: |
           test "${GITHUB_REF}" = "refs/heads/dev"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/plugins/nighty-tab.js src/plugins/nighty-session.js src/registry.json NightyTab/index.js NightyTab/manifest.json
+          git add -A -- src/plugins/nighty-tab.js src/plugins/nighty-session.js src/registry.json NightyTab/index.js NightyTab/manifest.json
           if ! git diff --cached --quiet; then
-            git commit -m 'Fix NightyTab origin-scoped session persistence on dev'
+            git commit -m 'Restore main NightyTab UI and limit dev changes to session persistence'
             git push origin HEAD:dev
           fi
