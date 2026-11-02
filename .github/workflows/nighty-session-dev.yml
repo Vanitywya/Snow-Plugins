@@ -1,0 +1,39 @@
+name: NightyTab dev session update
+on:
+  push:
+    branches: [dev]
+    paths:
+      - scripts/update-nighty-session.mjs
+      - .github/workflows/nighty-session-dev.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: nighty-session-dev
+  cancel-in-progress: false
+jobs:
+  update:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: node scripts/update-nighty-session.mjs
+      - run: node --check src/plugins/nighty-tab.js && node --check src/plugins/nighty-session.js
+      - run: npm ci
+      - run: npm run build
+      - name: Commit NightyTab changes to dev only
+        run: |
+          test "${GITHUB_REF}" = "refs/heads/dev"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/plugins/nighty-tab.js src/plugins/nighty-session.js src/registry.json NightyTab/index.js NightyTab/manifest.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Fix NightyTab origin-scoped session persistence on dev'
+            git push origin HEAD:dev
+          fi
