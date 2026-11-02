@@ -43,8 +43,9 @@ function patch(input) {
         const match = matches[0];
         output = output.slice(0, match.index) + match[1] + body + output.slice(match.index + match[0].length);
     }
-    const cookieHeader = /headers:\s*\{\s*Cookie:\s*`access_token=\$\{sessionToken\(\)\}`\s*\}/g;
-    output = output.replace(cookieHeader, 'headers: {}');
+    const cookieHeader = /headers:\s*\{\s*Cookie:\s*`access_token=\$\{[^`]+\}`\s*,?\s*\}/g;
+    const joinedCookieHeader = /headers:\s*\{\s*Cookie:\s*(["'])access_token=\1\s*\+\s*[A-Za-z_$][\w$]*(?:\(\))?\s*,?\s*\}/g;
+    output = output.replace(cookieHeader, 'headers: {}').replace(joinedCookieHeader, 'headers: {}');
     if (/Cookie:[^\n]*access_token/.test(output)) throw new Error('Unknown credential header; refusing unsafe restoration');
     return output;
 }
