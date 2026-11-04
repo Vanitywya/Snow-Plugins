@@ -623,6 +623,18 @@ var plugin = (() => {
 
   // project:src/plugins/console-test.js
   var LIMIT = 2e3;
+  var LEVELS = ["log", "info", "warn", "error", "debug"];
+  var COLORS = {
+    log: "#e8eaed",
+    info: "#8ab4f8",
+    warn: "#fdd663",
+    error: "#f28b82",
+    debug: "#9aa0a6",
+    command: "#8ab4f8",
+    result: "#81c995",
+    fatal: "#f28b82",
+    reject: "#f28b82"
+  };
   function preview(value) {
     if (typeof value === "string") return value.slice(0, LIMIT);
     if (typeof value === "undefined") return "undefined";
@@ -642,44 +654,22 @@ var plugin = (() => {
       return String(value).slice(0, LIMIT);
     }
   }
-  function probe(host = globalThis) {
-    const lines = [];
-    lines.push(`eval: ${typeof host.eval}`);
-    lines.push(`Function: ${typeof host.Function}`);
-    lines.push(`HermesInternal: ${host.HermesInternal ? "present" : "absent"}`);
-    lines.push(`console.log: ${typeof host.console?.log}`);
-    let evalResult = "not run";
-    try {
-      if (typeof host.eval === "function") evalResult = String((0, host.eval)("40+2"));
-    } catch (error) {
-      evalResult = `error: ${error.message}`;
-    }
-    lines.push(`eval 40+2: ${evalResult}`);
-    let functionResult = "not run";
-    try {
-      if (typeof host.Function === "function") functionResult = String(host.Function("return 40+2")());
-    } catch (error) {
-      functionResult = `error: ${error.message}`;
-    }
-    lines.push(`Function 40+2: ${functionResult}`);
-    const ran = evalResult === "42" || functionResult === "42";
-    lines.push(ran ? "JavaScript ran in this Discord runtime." : "JavaScript did not run in this Discord runtime.");
-    return { lines, ran };
+  function formatValue(value) {
+    if (typeof value === "string") return value;
+    if (value?.stack) return String(value.stack);
+    return preview(value);
   }
-  function hostNotes(r) {
-    const modules = r?.RN?.NativeModules || {};
-    const names = Object.keys(modules).filter((name) => /console|hermes|devmenu|devsettings|debugger|inspector/i.test(name));
-    const notes = [names.length ? `Native modules: ${names.join(", ")}` : "Native modules: no console, Hermes, DevMenu, or inspector name"];
-    for (const name of ["DevMenu", "Debugger", "Console"]) {
-      let found = false;
-      try {
-        found = !!r?.byName?.(name);
-      } catch {
-        found = false;
-      }
-      notes.push(`${name}: ${found ? "found" : "not found"}`);
-    }
-    return notes;
+  function redact(text) {
+    return String(text).replace(/(https:\/\/(?:\w+\.)?discord(?:app)?\.com\/api(?:\/v\d+)?\/webhooks\/\d+\/)[\w-]+/gi, "$1[redacted]").replace(/(authorization["']?\s*[:=]\s*["']?)(?:Bearer\s+)?[^\s,"'}]+/gi, "$1[redacted]").replace(/(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]+/g, "[redacted]");
+  }
+  function visibleEntries(entries, enabled, query) {
+    const needle = String(query || "").trim().toLowerCase();
+    return entries.filter((entry) => {
+      if (needle && !entry.text.toLowerCase().includes(needle)) return false;
+      if (entry.level === "command" || entry.level === "result") return true;
+      if (entry.level === "fatal" || entry.level === "reject") return enabled.error !== false;
+      return enabled[entry.level] !== false;
+    });
   }
   function execute(code, host = globalThis) {
     const source = String(code ?? "");
@@ -689,60 +679,209 @@ var plugin = (() => {
     return (0, host.eval)(source);
   }
   function ConsoleTest(r) {
-    const { h, React } = r;
-    const { Page, Text, Button, Input } = ui(r);
-    function Settings() {
+    const { h, React, RN } = r;
+    let entries = [];
+    let seq = 0;
+    let timer;
+    function stamp() {
+      const now = /* @__PURE__ */ new Date();
+      return now.toLocaleTimeString([], { hour12: false });
+    }
+    function notify() {
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        if (r.active) r.changed();
+      }, 50);
+    }
+    function push(entry) {
+      const text = redact(formatValue(entry.text)).slice(0, 8e3);
+      const last = entries[entries.length - 1];
+      if (last && entry.level !== "command" && last.level === entry.level && last.text === text) {
+        last.count += 1;
+        last.time = stamp();
+      } else {
+        entries.push({ id: ++seq, level: entry.level, text, time: stamp(), count: 1 });
+        if (entries.length > 500) entries.splice(0, entries.length - 500);
+      }
+      notify();
+    }
+    function clear() {
+      entries = [];
+      notify();
+    }
+    function Console({ close }) {
       r.useRefresh();
-      const [code, setCode] = React.useState("1 + 1");
-      const [report, setReport] = React.useState("Press Probe or Run. Nothing runs until you do.");
-      function show(lines) {
-        const text = lines.join("\n");
-        setReport(text);
+      const listRef = React.useRef(null);
+      const [code, setCode] = React.useState("");
+      const [query, setQuery] = React.useState("");
+      const [enabled, setEnabled] = React.useState({ log: true, info: true, warn: true, error: true, debug: true });
+      const visible = visibleEntries(entries, enabled, query);
+      const screen = RN.Dimensions?.get?.("window")?.height || 700;
+      const font = RN.Platform?.OS === "ios" ? "Menlo" : "monospace";
+      React.useEffect(() => {
+        listRef.current?.scrollToEnd?.({ animated: false });
+      }, [visible.length, entries.length]);
+      function run() {
+        const source = code;
+        if (!source.trim()) return;
+        setCode("");
+        push({ level: "command", text: source });
         try {
-          console.log(`[ConsoleTest]
-${text}`);
-        } catch {
+          push({ level: "result", text: preview(execute(source)) });
+        } catch (error) {
+          push({ level: "error", text: error?.stack || error?.message || String(error) });
         }
       }
+      function chip(level) {
+        const on = enabled[level] !== false;
+        const color = COLORS[level];
+        return h(RN.Pressable, {
+          key: level,
+          accessibilityRole: "button",
+          accessibilityLabel: `${on ? "Hide" : "Show"} ${level}`,
+          accessibilityState: { selected: on },
+          onPress: () => setEnabled((current) => ({ ...current, [level]: !current[level] })),
+          style: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, borderWidth: 1, borderColor: on ? color : "#3c4043", backgroundColor: on ? "#303134" : "transparent", opacity: on ? 1 : 0.45 }
+        }, h(RN.Text, { style: { color, fontSize: 12, fontWeight: "700", textDecorationLine: on ? "none" : "line-through" } }, level));
+      }
+      function row({ item }) {
+        const color = COLORS[item.level] || COLORS.log;
+        const wash = item.level === "warn" ? "#3a3000" : item.level === "error" || item.level === "fatal" || item.level === "reject" ? "#3c2020" : "transparent";
+        const prefix = item.level === "command" ? "\u203A" : item.level === "result" ? "\u2190" : item.level;
+        return h(
+          RN.View,
+          { key: String(item.id), style: { borderTopWidth: 1, borderTopColor: "#303134", borderLeftWidth: 3, borderLeftColor: color, backgroundColor: wash, paddingHorizontal: 8, paddingVertical: 5, flexDirection: "row", gap: 8 } },
+          h(RN.Text, { style: { color, fontFamily: font, fontSize: 11, width: 52 } }, prefix),
+          h(RN.Text, { selectable: true, style: { color: item.level === "command" ? "#e8eaed" : color, fontFamily: font, fontSize: 12, lineHeight: 16, flex: 1 } }, item.text),
+          item.count > 1 ? h(RN.Text, { style: { color: "#202124", backgroundColor: color, overflow: "hidden", borderRadius: 8, paddingHorizontal: 5, fontSize: 11, fontWeight: "700" } }, String(item.count)) : null,
+          h(RN.Text, { style: { color: "#9aa0a6", fontFamily: font, fontSize: 10 } }, item.time)
+        );
+      }
       return h(
-        Page,
-        { title: "Console test" },
-        h(Text, { muted: true }, "Checks whether Snow can run JavaScript in this Discord app. Probe tests the runtime. Run executes the snippet and prints the result with console.log."),
-        h(Button, { text: "Probe runtime", variant: "secondary", onPress: () => show([...probe().lines, ...hostNotes(r)]) }),
-        h(Input, {
-          label: "JavaScript",
-          value: code,
-          onChange: setCode,
-          placeholder: "1 + 1",
-          multiline: true,
-          maxLength: LIMIT,
-          style: { minHeight: 120, textAlignVertical: "top" }
-        }),
-        h(Button, { text: "Run snippet", onPress: () => {
-          try {
-            show([`Result: ${preview(execute(code))}`]);
-          } catch (error) {
-            show([`Error: ${error.message || error}`]);
-          }
-        } }),
-        h(Text, { selectable: true }, report)
+        RN.View,
+        { style: { height: Math.round(screen * 0.72), backgroundColor: "#202124", borderRadius: 12, overflow: "hidden" } },
+        h(
+          RN.View,
+          { style: { backgroundColor: "#292a2d", borderBottomWidth: 1, borderBottomColor: "#3c4043", paddingHorizontal: 10, paddingVertical: 8, gap: 8 } },
+          h(
+            RN.View,
+            { style: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" } },
+            h(RN.Text, { style: { color: "#e8eaed", fontSize: 13, fontWeight: "700" } }, "Console"),
+            h(
+              RN.Pressable,
+              { accessibilityRole: "button", accessibilityLabel: "Clear console", onPress: clear, style: { paddingHorizontal: 8, paddingVertical: 4 } },
+              h(RN.Text, { style: { color: "#9aa0a6", fontSize: 12, fontWeight: "700" } }, "Clear")
+            )
+          ),
+          h(RN.View, { style: { flexDirection: "row", flexWrap: "wrap", gap: 6 } }, ...LEVELS.map(chip)),
+          h(RN.TextInput, {
+            value: query,
+            onChangeText: setQuery,
+            placeholder: "Filter",
+            placeholderTextColor: "#9aa0a6",
+            autoCapitalize: "none",
+            autoCorrect: false,
+            style: { minHeight: 32, color: "#e8eaed", fontSize: 13, backgroundColor: "#202124", borderRadius: 8, borderWidth: 1, borderColor: "#3c4043", paddingHorizontal: 8, paddingVertical: 4 }
+          })
+        ),
+        h(RN.ScrollView, {
+          ref: listRef,
+          style: { flex: 1 },
+          contentContainerStyle: visible.length ? null : { flexGrow: 1, alignItems: "center", justifyContent: "center" },
+          keyboardShouldPersistTaps: "handled",
+          onContentSizeChange: () => listRef.current?.scrollToEnd?.({ animated: false })
+        }, visible.length ? visible.map((item) => row({ item })) : h(RN.Text, { style: { color: "#9aa0a6", fontFamily: font, fontSize: 12 } }, "No console messages")),
+        h(
+          RN.View,
+          { style: { flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 1, borderTopColor: "#3c4043", backgroundColor: "#171717", paddingHorizontal: 10, paddingVertical: 8 } },
+          h(RN.Text, { style: { color: "#8ab4f8", fontFamily: font, fontSize: 16, fontWeight: "700" } }, "\u203A"),
+          h(RN.TextInput, {
+            value: code,
+            onChangeText: setCode,
+            onSubmitEditing: run,
+            placeholder: "JavaScript",
+            placeholderTextColor: "#6d7278",
+            autoCapitalize: "none",
+            autoCorrect: false,
+            blurOnSubmit: false,
+            returnKeyType: "done",
+            style: { flex: 1, minHeight: 36, color: "#e8eaed", fontFamily: font, fontSize: 13, padding: 0 }
+          })
+        ),
+        close ? h(
+          RN.Pressable,
+          { accessibilityRole: "button", accessibilityLabel: "Close", onPress: close, style: { alignItems: "center", paddingVertical: 8 } },
+          h(RN.Text, { style: { color: "#9aa0a6", fontSize: 13, fontWeight: "700" } }, "Close")
+        ) : null
       );
     }
     return {
       start() {
-        r.command({
-          name: "consoletest",
-          description: "Open the Discord console execution test",
-          execute() {
-            r.open("console", Settings);
-          }
-        });
+        for (const name of ["log", "info", "warn", "error", "debug"]) {
+          let wrapped = function(...args) {
+            push({ level: name, text: args.map(formatValue).join(" ") });
+            return original?.apply(console, args);
+          };
+          const original = console[name];
+          console[name] = wrapped;
+          r.own(() => {
+            if (console[name] === wrapped) console[name] = original;
+          });
+        }
+        if (typeof console.trace === "function") {
+          let wrapped = function(...args) {
+            push({ level: "debug", text: args.map(formatValue).join(" ") });
+            return original.apply(console, args);
+          };
+          const original = console.trace;
+          console.trace = wrapped;
+          r.own(() => {
+            if (console.trace === wrapped) console.trace = original;
+          });
+        }
+        if (typeof console.clear === "function") {
+          let wrapped = function(...args) {
+            clear();
+            return original.apply(console, args);
+          };
+          const original = console.clear;
+          console.clear = wrapped;
+          r.own(() => {
+            if (console.clear === wrapped) console.clear = original;
+          });
+        }
+        const errors = globalThis.ErrorUtils;
+        if (errors?.getGlobalHandler && errors?.setGlobalHandler) {
+          const old = errors.getGlobalHandler();
+          const handler = (error, fatal) => {
+            push({ level: fatal ? "fatal" : "error", text: error });
+            old?.(error, fatal);
+          };
+          errors.setGlobalHandler(handler);
+          r.own(() => {
+            if (errors.getGlobalHandler() === handler) errors.setGlobalHandler(old);
+          });
+        }
+        if (globalThis.addEventListener && globalThis.removeEventListener) {
+          const reject = (event) => push({ level: "reject", text: event?.reason });
+          globalThis.addEventListener("unhandledrejection", reject);
+          r.own(() => globalThis.removeEventListener("unhandledrejection", reject));
+        }
+        r.command({ name: "consoletest", description: "Open the Discord console", execute() {
+          r.open("console", Console, {}, { scrollable: false });
+        } });
       },
-      Settings
+      stop() {
+        clearTimeout(timer);
+        entries = [];
+      },
+      Settings: Console,
+      getEntries: () => entries
     };
   }
 
   // ConsoleTest.entry.js
-  var ConsoleTest_entry_default = register({ "id": "mime.consoletest", "name": "Console Test", "description": "Check whether Snow can run JavaScript in Discord's console.", "version": "1.0.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ConsoleTest" }, ConsoleTest);
+  var ConsoleTest_entry_default = register({ "id": "mime.consoletest", "name": "Console Test", "description": "Desktop-style Discord console with level filters and a JavaScript prompt.", "version": "1.1.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ConsoleTest" }, ConsoleTest);
   return __toCommonJS(ConsoleTest_entry_exports);
 })();

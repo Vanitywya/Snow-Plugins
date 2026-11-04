@@ -148,8 +148,8 @@
     "module": "console-test",
     "id": "mime.consoletest",
     "name": "Console Test",
-    "description": "Check whether Snow can run JavaScript in Discord's console.",
-    "version": "1.0.0",
+    "description": "Desktop-style Discord console with level filters and a JavaScript prompt.",
+    "version": "1.1.0",
     "authors": [
       {
         "name": "Mime | N0_.q3",
