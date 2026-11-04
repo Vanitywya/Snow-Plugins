@@ -144,6 +144,22 @@
     "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/TestPlugin"
   },
   {
+    "folder": "ConsoleTest",
+    "module": "console-test",
+    "id": "mime.consoletest",
+    "name": "Console Test",
+    "description": "Check whether Snow can run JavaScript in Discord's console.",
+    "version": "1.0.0",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ],
+    "license": "MIT",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ConsoleTest"
+  },
+  {
     "folder": "BlurNSFW",
     "module": "mobile-ports",
     "exportName": "BlurNsfw",
