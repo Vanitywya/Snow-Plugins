@@ -5,6 +5,8 @@ I am not responsible for any damage caused by this plugin; use at your own risk
 Vencord does not endorse/support this plugin
 https://github.com/neoarz/NitroSniper
 Snow SDK: capture bunny during eval.
+2.4.2: automated hCaptcha — fixed sheet mount (r.open/showSheet), on-screen
+widget, external solver endpoint option; src/plugins/captcha.js is canonical.
 */
 
 var B = (typeof bunny !== "undefined" && bunny) || (typeof snow !== "undefined" && snow) || null;

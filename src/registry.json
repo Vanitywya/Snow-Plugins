@@ -92,8 +92,8 @@
     "module": "nitro-sniper",
     "id": "mime.nitrosniper",
     "name": "NitroSniper",
-    "description": "Process new gift links with a deduplicated queue and visible results.",
-    "version": "2.4.1",
+    "description": "Process new gift links with a deduplicated queue, visible results and automated hCaptcha solving.",
+    "version": "2.4.2",
     "authors": [
       {
         "name": "neoarz",
@@ -360,7 +360,7 @@
     "id": "mime.nightytab",
     "name": "Nighty Tab",
     "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.",
-    "version": "1.7.0",
+    "version": "2.0.0",
     "authors": [
       {
         "name": "Mime | N0_.q3",

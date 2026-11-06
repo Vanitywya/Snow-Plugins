@@ -448,128 +448,141 @@ var plugin = (() => {
     const colors = { background: "#111214", surface: "#1E1F22", surfacePressed: "#26272B", border: "#2B2D31", text: "#F2F3F5", muted: "#B5BAC1", accent: "#5865F2", danger: "#F23F43" };
     const palette = { "text-danger": colors.danger, "text-warning": "#FEE75C", "text-muted": colors.muted, "text-normal": colors.text };
     function Text({ children, muted = false, heading = false, color, style, ...props }) {
-        const resolved = palette[color] || (muted ? colors.muted : colors.text);
-        const base = heading
-            ? { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: "600", marginLeft: 4, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }
-            : { color: resolved, fontSize: muted ? 13 : 16, lineHeight: muted ? 18 : 21, fontWeight: muted ? "400" : "600" };
-        return h(RN.Text, { ...props, style: [base, style] }, children);
+      const resolved = palette[color] || (muted ? colors.muted : colors.text);
+      const base = heading ? { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: "600", marginLeft: 4, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } : { color: resolved, fontSize: muted ? 13 : 16, lineHeight: muted ? 18 : 21, fontWeight: muted ? "400" : "600" };
+      return h(RN.Text, { ...props, style: [base, style] }, children);
     }
     function Button({ text, onPress, disabled, variant = "primary", ...props }) {
-        const primary = variant !== "secondary";
-        return h(RN.Pressable || RN.TouchableOpacity, {
-            ...props,
-            accessibilityRole: "button",
-            accessibilityLabel: text,
-            accessibilityState: { disabled: !!disabled },
-            disabled: !!disabled,
-            onPress,
-            style: ({ pressed } = {}) => ({
-                minHeight: 48,
-                borderRadius: 12,
-                paddingHorizontal: 16,
-                backgroundColor: primary ? (pressed ? "#4752C4" : colors.accent) : (pressed ? colors.surfacePressed : colors.surface),
-                borderWidth: primary ? 0 : 1,
-                borderColor: colors.border,
-                alignItems: "center",
-                justifyContent: "center",
-                opacity: disabled ? 0.5 : 1,
-            }),
-        }, h(RN.Text, { style: { color: primary ? "#FFFFFF" : colors.muted, fontSize: 16, lineHeight: 20, fontWeight: "700" } }, text));
+      const primary = variant !== "secondary";
+      return h(RN.Pressable || RN.TouchableOpacity, {
+        ...props,
+        accessibilityRole: "button",
+        accessibilityLabel: text,
+        accessibilityState: { disabled: !!disabled },
+        disabled: !!disabled,
+        onPress,
+        style: ({ pressed } = {}) => ({
+          minHeight: 48,
+          borderRadius: 12,
+          paddingHorizontal: 16,
+          backgroundColor: primary ? pressed ? "#4752C4" : colors.accent : pressed ? colors.surfacePressed : colors.surface,
+          borderWidth: primary ? 0 : 1,
+          borderColor: colors.border,
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: disabled ? 0.5 : 1
+        })
+      }, h(RN.Text, { style: { color: primary ? "#FFFFFF" : colors.muted, fontSize: 16, lineHeight: 20, fontWeight: "700" } }, text));
     }
     function Input({ value, onChange, label, secureTextEntry, style, ...props }) {
-        const field = h(RN.TextInput, {
-            ...props,
-            value: value == null ? "" : String(value),
-            onChangeText: onChange,
-            secureTextEntry: !!secureTextEntry,
-            placeholderTextColor: "#6D6F78",
-            autoCorrect: false,
-            selectionColor: colors.accent,
-            style: [{ minHeight: 50, color: colors.text, fontSize: 16, lineHeight: 21, backgroundColor: "#151619", borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 12 }, style],
-        });
-        if (!label) return field;
-        return h(RN.View, { style: { gap: 8 } },
-            h(RN.Text, { style: { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: "600", marginLeft: 4 } }, label),
-            field);
+      const field = h(RN.TextInput, {
+        ...props,
+        value: value == null ? "" : String(value),
+        onChangeText: onChange,
+        secureTextEntry: !!secureTextEntry,
+        placeholderTextColor: "#6D6F78",
+        autoCorrect: false,
+        selectionColor: colors.accent,
+        style: [{ minHeight: 50, color: colors.text, fontSize: 16, lineHeight: 21, backgroundColor: "#151619", borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 12 }, style]
+      });
+      if (!label) return field;
+      return h(
+        RN.View,
+        { style: { gap: 8 } },
+        h(RN.Text, { style: { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: "600", marginLeft: 4 } }, label),
+        field
+      );
     }
     function Toggle({ setting, label, subLabel }) {
-        r.useRefresh();
-        return h(RN.View, { style: { minHeight: 72, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, gap: 12 } },
-            h(RN.View, { style: { flex: 1 } },
-                h(RN.Text, { style: { color: colors.text, fontSize: 16, lineHeight: 21, fontWeight: "600", marginBottom: subLabel ? 3 : 0 } }, label),
-                subLabel ? h(RN.Text, { style: { color: colors.muted, fontSize: 14, lineHeight: 19 } }, subLabel) : null),
-            h(RN.Switch, {
-                accessibilityLabel: label,
-                value: !!store[setting],
-                onValueChange: value => r.set(setting, value),
-                trackColor: { false: "#3F4147", true: colors.accent },
-                thumbColor: "#FFFFFF",
-                ios_backgroundColor: "#3F4147",
-            }));
+      r.useRefresh();
+      return h(
+        RN.View,
+        { style: { minHeight: 72, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, gap: 12 } },
+        h(
+          RN.View,
+          { style: { flex: 1 } },
+          h(RN.Text, { style: { color: colors.text, fontSize: 16, lineHeight: 21, fontWeight: "600", marginBottom: subLabel ? 3 : 0 } }, label),
+          subLabel ? h(RN.Text, { style: { color: colors.muted, fontSize: 14, lineHeight: 19 } }, subLabel) : null
+        ),
+        h(RN.Switch, {
+          accessibilityLabel: label,
+          value: !!store[setting],
+          onValueChange: (value) => r.set(setting, value),
+          trackColor: { false: "#3F4147", true: colors.accent },
+          thumbColor: "#FFFFFF",
+          ios_backgroundColor: "#3F4147"
+        })
+      );
     }
     function Slider({ value, onValueChange, ...props }) {
-        return h(Input, {
-            ...props,
-            value: String(value),
-            onChange: text => {
-                const next = Number(text);
-                onValueChange(Number.isFinite(next) ? next : 0);
-            },
-            keyboardType: "numeric",
-        });
+      return h(Input, {
+        ...props,
+        value: String(value),
+        onChange: (text) => {
+          const next = Number(text);
+          onValueChange(Number.isFinite(next) ? next : 0);
+        },
+        keyboardType: "numeric"
+      });
     }
     function card(rows) {
-        return h(RN.View, { style: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: "hidden" } }, ...rows);
+      return h(RN.View, { style: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: "hidden" } }, ...rows);
     }
     function Page({ title, children, close }) {
-        const items = [];
-        const walk = value => {
-            if (value == null || value === false) return;
-            if (Array.isArray(value)) { value.forEach(walk); return; }
-            items.push(value);
-        };
-        walk(children);
-        const blocks = [];
-        let toggles = [];
-        const flush = () => {
-            if (!toggles.length) return;
-            const rows = [];
-            toggles.forEach((node, index) => {
-                if (index) rows.push(h(RN.View, { key: "divider-" + index, style: { height: 1, backgroundColor: colors.border, marginLeft: 16 } }));
-                rows.push(node);
-            });
-            blocks.push(card(rows));
-            toggles = [];
-        };
-        for (const child of items) {
-            if (child.type === Toggle) { toggles.push(child); continue; }
-            flush();
-            if (child.type === Input) {
-                blocks.push(card([h(RN.View, { key: "field", style: { padding: 14 } }, child)]));
-                continue;
-            }
-            blocks.push(child);
+      const items = [];
+      const walk = (value) => {
+        if (value == null || value === false) return;
+        if (Array.isArray(value)) {
+          value.forEach(walk);
+          return;
+        }
+        items.push(value);
+      };
+      walk(children);
+      const blocks = [];
+      let toggles = [];
+      const flush = () => {
+        if (!toggles.length) return;
+        const rows = [];
+        toggles.forEach((node, index) => {
+          if (index) rows.push(h(RN.View, { key: "divider-" + index, style: { height: 1, backgroundColor: colors.border, marginLeft: 16 } }));
+          rows.push(node);
+        });
+        blocks.push(card(rows));
+        toggles = [];
+      };
+      for (const child of items) {
+        if (child.type === Toggle) {
+          toggles.push(child);
+          continue;
         }
         flush();
-        const body = [];
-        if (title) body.push(h(RN.Text, { key: "title", accessibilityRole: "header", style: { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: "600", marginLeft: 4, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, title));
-        blocks.forEach((block, index) => {
-            if (body.length && !(title && index === 0)) body.push(h(RN.View, { key: "gap-" + index, style: { height: 22 } }));
-            body.push(block);
-        });
-        if (close) {
-            if (body.length) body.push(h(RN.View, { key: "gap-close", style: { height: 22 } }));
-            body.push(h(Button, { key: "close", text: "Close", variant: "secondary", onPress: close }));
+        if (child.type === Input) {
+          blocks.push(card([h(RN.View, { key: "field", style: { padding: 14 } }, child)]));
+          continue;
         }
-        return h(RN.ScrollView, {
-            style: { flex: 1, backgroundColor: colors.background },
-            contentContainerStyle: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 36 },
-            keyboardShouldPersistTaps: "handled",
-            showsVerticalScrollIndicator: false,
-        }, ...body);
+        blocks.push(child);
+      }
+      flush();
+      const body = [];
+      if (title) body.push(h(RN.Text, { key: "title", accessibilityRole: "header", style: { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: "600", marginLeft: 4, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, title));
+      blocks.forEach((block, index) => {
+        if (body.length && !(title && index === 0)) body.push(h(RN.View, { key: "gap-" + index, style: { height: 22 } }));
+        body.push(block);
+      });
+      if (close) {
+        if (body.length) body.push(h(RN.View, { key: "gap-close", style: { height: 22 } }));
+        body.push(h(Button, { key: "close", text: "Close", variant: "secondary", onPress: close }));
+      }
+      return h(RN.ScrollView, {
+        style: { flex: 1, backgroundColor: colors.background },
+        contentContainerStyle: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 36 },
+        keyboardShouldPersistTaps: "handled",
+        showsVerticalScrollIndicator: false
+      }, ...body);
     }
     return { Text, Button, Page, Input, Toggle, Slider };
-}
+  }
   function register(meta, factory) {
     const B = bunny;
     let runtime;
@@ -609,7 +622,8 @@ var plugin = (() => {
   }
 
   // project:src/plugins/captcha.js
-  function captchaErrorInfo(e) {    const body = e?.body || {};
+  function captchaErrorInfo(e) {
+    const body = e?.body || {};
     if (body.captcha_required || body.captcha_service || body.captcha_sitekey) {
       return {
         service: body.captcha_service || "hcaptcha",
@@ -622,124 +636,171 @@ var plugin = (() => {
   var CAPTCHA_HTML = [
     '<!DOCTYPE html><html><head><meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    '<script src="https://js.hcaptcha.com/1/api.js?render=explicit" onload="window.__apiReady=true"><\/script>',
-    "</head><body>",
-    '<div id="box" style="position:fixed;left:-9999px;top:0;width:304px;height:78px"></div>',
-    '<script>',
-    "var sitekey = null;",
+    '<script src="https://js.hcaptcha.com/1/api.js?render=explicit" onload="window.__apiReady=true"></script>',
+    '</head><body style="margin:0">',
+    '<div id="box" style="position:fixed;left:0;top:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center"></div>',
+    "<script>",
+    "var widgetId = null;",
     "function post(type, data) {",
     "  var payload = Object.assign({ type: type }, data || {});",
     "  try { window.ReactNativeWebView.postMessage(JSON.stringify(payload)); } catch (e) {}",
     "}",
-    "post('ready', { apiReady: !!window.__apiReady });",
+    'post("ready", { apiReady: !!window.__apiReady });',
     "window.solveCaptcha = function (sk) {",
-    "  sitekey = sk;",
     "  try {",
-    "    if (!window.hcaptcha) { post('error', { message: 'hcaptcha api not loaded' }); return; }",
-    "    var id = hcaptcha.render('box', {",
+    "    if (widgetId !== null) { try { hcaptcha.reset(widgetId); } catch (e) {} }",
+    '    else widgetId = hcaptcha.render("box", {',
     "      sitekey: sk,",
-    "      size: 'invisible',",
-    "      callback: function (token) { post('token', { token: token }); },",
-    "      'error-callback': function (err) { post('error', { message: String(err) }); },",
-    "      'expired-callback': function () { post('error', { message: 'captcha expired' }); },",
-    "      'chalexpired-callback': function () { post('error', { message: 'challenge expired' }); },",
-    "      'open-callback': function () { post('challenge_opened', {}); },",
-    "      'close-callback': function () { post('challenge_closed', {}); }",
+    '      size: "invisible",',
+    '      callback: function (token) { post("token", { token: token }); },',
+    '      "error-callback": function (err) { post("error", { message: String(err) }); },',
+    '      "expired-callback": function () { post("error", { message: "captcha expired" }); },',
+    '      "chalexpired-callback": function () { post("error", { message: "challenge expired" }); },',
+    '      "open-callback": function () { post("challenge_opened", {}); },',
+    '      "close-callback": function () { post("challenge_closed", {}); }',
     "    });",
-    "    hcaptcha.execute(id);",
-    "  } catch (e) { post('error', { message: String(e && e.message || e) }); }",
+    "    hcaptcha.execute(widgetId);",
+    '  } catch (e) { post("error", { message: String(e && e.message || e) }); }',
     "};",
-    "<\/script></body></html>"
+    "</script></body></html>"
   ].join("");
+  var SOLVER_TIMEOUT = 6e4;
+  var MAX_AUTO_RETRY = 3;
   function createCaptchaSolver(r, React) {
     const WebView = r.find("WebView")?.WebView || r.byName("WebView");
     let sheetClose = null;
-    function mountHost() {
-      if (sheetClose) return;
-      if (typeof r.ui?.sheets?.open !== "function") return;
+    let pending = null;
+    let requestId = 0;
+    let epoch = 0;
+    function closeSheet() {
+      if (!sheetClose) return;
+      const close = sheetClose;
+      sheetClose = null;
       try {
-        r.ui.sheets.open("nitrosniper-captcha", function CaptchaHost({ close }) {
-          React.useEffect(() => {
-            sheetClose = close;
-            return () => {
-              if (sheetClose === close) sheetClose = null;
-            };
-          }, [close]);
-          const el = element();
-          return el || null;
+        close();
+      } catch {
+      }
+    }
+    function mountHost() {
+      if (sheetClose || !React) return;
+      try {
+        sheetClose = r.open("captcha", function CaptchaHost() {
+          return element() || null;
         }, {}, { scrollable: false });
       } catch {
         sheetClose = null;
       }
     }
-    function unmountHost() {
-      if (!sheetClose) return;
-      const close = sheetClose;
-      sheetClose = null;
-      try { close(); } catch { }
+    async function solveViaEndpoint(sitekey) {
+      const url = String(r.store.captchaSolverUrl || "").trim();
+      if (!url) return null;
+      const res = await r.request(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sitekey, pageurl: "https://discord.com" })
+      }, 12e4);
+      const body = res.json();
+      const token = body?.token || body?.solution?.token || body?.request || null;
+      if (!token || typeof token !== "string") throw new Error("solver endpoint returned no token");
+      return token;
     }
-    let pending = null;
-    let requestId = 0;
     function solve(sitekey) {
       return new Promise((resolvePromise, rejectPromise) => {
-        if (!WebView) {
-          rejectPromise(new Error("WebView unavailable in this Snow build"));
-          return;
-        }
-        const id = ++requestId;
-        pending = { id, resolvePromise, rejectPromise, sitekey, opened: false };
-        mountHost();
-        r.changed();
-        setTimeout(() => {
-          if (pending && pending.id === id) {
-            const timeout = pending;
-            pending = null;
-            unmountHost();
-            timeout.rejectPromise(new Error("captcha solve timed out (widget did not return a token in 60s)"));
-            r.changed();
+        const p = { pending: true, resolvePromise, rejectPromise, sitekey, id: ++requestId };
+        const settle = (ok, value) => {
+          if (p.pending) {
+            p.pending = false;
+            ok ? p.resolvePromise(value) : p.rejectPromise(value);
           }
-        }, 6e4);
+        };
+        solveViaEndpoint(sitekey).then((token) => {
+          if (token) {
+            settle(true, token);
+            r.changed();
+          } else startWidget();
+        }).catch(() => startWidget());
+        function startWidget() {
+          if (!p.pending) return;
+          if (!WebView) {
+            settle(false, new Error("WebView unavailable in this Snow build"));
+            return;
+          }
+          pending = p;
+          epoch++;
+          p.retries = 0;
+          mountHost();
+          if (!sheetClose) {
+            settle(false, new Error("captcha sheet unavailable in this Snow build"));
+            return;
+          }
+          r.changed();
+          setTimeout(() => {
+            if (pending === p && p.pending) {
+              pending = null;
+              closeSheet();
+              settle(false, new Error("captcha solve timed out (widget did not return a token in 60s)"));
+              r.changed();
+            }
+          }, SOLVER_TIMEOUT);
+        }
       });
     }
     function handleMessage(data) {
       let msg;
-      try { msg = JSON.parse(data); } catch { return; }
+      try {
+        msg = JSON.parse(data);
+      } catch {
+        return;
+      }
       const current = pending;
-      if (!current) return;
+      if (!current || !current.pending) return;
       if (msg.type === "token") {
         pending = null;
-        unmountHost();
+        closeSheet();
+        current.pending = false;
         current.resolvePromise(String(msg.token));
         r.changed();
       } else if (msg.type === "error") {
+        if (current.retries < MAX_AUTO_RETRY) {
+          current.retries++;
+          epoch++;
+          r.changed();
+          return;
+        }
         pending = null;
-        unmountHost();
+        closeSheet();
+        current.pending = false;
         current.rejectPromise(new Error(`captcha widget: ${msg.message || "unknown error"}`));
         r.changed();
       } else if (msg.type === "challenge_opened") {
-        current.opened = true;
-        r.toast("hCaptcha needs one tap — finish the puzzle on screen", "ShieldIcon");
+        r.toast("hCaptcha needs one tap \u2014 finish the puzzle on screen", "ShieldIcon");
         r.changed();
       }
     }
     function element() {
-      if (!pending || !WebView) return null;
+      if (!pending || !pending.pending || !WebView || !React) return null;
       const sitekey = String(pending.sitekey || "");
+      const inject = "if (window.solveCaptcha) { window.solveCaptcha(" + JSON.stringify(sitekey) + "); } else { setTimeout(function () { window.solveCaptcha && window.solveCaptcha(" + JSON.stringify(sitekey) + "); }, 1500); }";
       return React.createElement(WebView, {
-        key: `captcha-${pending.id}`,
+        key: `captcha-${pending.id}-${epoch}`,
         source: { html: CAPTCHA_HTML, baseUrl: "https://discord.com" },
         originWhitelist: ["*"],
         javaScriptEnabled: true,
         domStorageEnabled: true,
-        injectedJavaScript: [
-          "window.addEventListener('message', function (e) { if (e.data === 'retry') window.solveCaptcha && window.solveCaptcha(" + JSON.stringify(sitekey) + "); });",
-          "document.addEventListener('message', function (e) { if (e.data === 'retry') window.solveCaptcha && window.solveCaptcha(" + JSON.stringify(sitekey) + "); });",
-          "if (window.solveCaptcha) { window.solveCaptcha(" + JSON.stringify(sitekey) + "); } else { setTimeout(function () { window.solveCaptcha && window.solveCaptcha(" + JSON.stringify(sitekey) + "); }, 1500); }"
-        ].join("\n"),
+        style: { height: "100%", width: "100%" },
+        injectedJavaScript: inject,
         onMessage: (event) => handleMessage(event?.nativeEvent?.data)
       });
     }
-    return { solve, element, isPending: () => !!pending };
+    function dispose() {
+      closeSheet();
+      if (pending && pending.pending) {
+        pending.pending = false;
+        pending.rejectPromise(new Error("captcha solver disposed"));
+      }
+      pending = null;
+    }
+    return { solve, element, handleMessage, isPending: () => !!(pending && pending.pending), dispose };
   }
 
   // project:src/plugins/nitro-sniper.js
@@ -796,7 +857,7 @@ var plugin = (() => {
                   const token = await solver.solve(cap.sitekey);
                   captchaKey = token;
                   captchaRqtoken = cap.rqtoken;
-                  attempt--; // don't consume attempts on the captcha round-trip
+                  attempt--;
                   continue;
                 }
                 if (e.status !== 429 || attempt >= 2 || e.retryAfter <= 0 || e.retryAfter > 120) throw e;
@@ -863,6 +924,7 @@ var plugin = (() => {
     function Settings() {
       r.useRefresh();
       const [url, setUrl] = React.useState(r.store.webhookUrl || "");
+      const [solverUrl, setSolverUrl] = React.useState(r.store.captchaSolverUrl || "");
       return h(
         Page,
         { title: "NitroSniper" },
@@ -881,7 +943,20 @@ var plugin = (() => {
           }
         } }),
         h(Button, { text: "Send test webhook", variant: "secondary", onPress: () => webhook({ content: "NitroSniper Snow webhook test" }).then(() => r.toast(r.store.webhookUrl ? "Test sent" : "Set a webhook first")).catch((e) => r.error("Webhook test", e)) }),
-        h(Text, { muted: true }, "Only new live messages are processed. Timeouts are shown and never retried automatically. Desktop callbacks are replaced by one mobile REST request.")
+        h(Input, { label: "Optional captcha solver URL (fully automated)", value: solverUrl, onChange: setSolverUrl, autoCapitalize: "none", placeholder: "https://your-solver/api" }),
+        h(Button, { text: "Save solver URL", variant: "secondary", onPress: async () => {
+          try {
+            if (solverUrl.trim()) {
+              new URL(solverUrl.trim());
+            }
+            r.set("captchaSolverUrl", solverUrl.trim());
+            await r.api.storage.flush();
+            r.toast("Saved");
+          } catch (e) {
+            r.error("Solver URL", e);
+          }
+        } }),
+        h(Text, { muted: true }, "Automatically solves hCaptcha when Discord requires it: on-screen widget by default, external solver endpoint if set. Only new live messages are processed.")
       );
     }
     return { start() {
@@ -895,14 +970,15 @@ var plugin = (() => {
       });
     }, stop() {
       stopped = true;
+      solver.dispose();
       queue.length = 0;
       clearTimeout(waitTimer);
       releaseWait?.();
     }, Settings, receive, stats };
   }
-  NitroSniper.defaults = { ignoreOwnGiftLinks: false, webhookUrl: "" };
+  NitroSniper.defaults = { ignoreOwnGiftLinks: false, webhookUrl: "", captchaSolverUrl: "" };
 
   // NitroSniper.entry.js
-  var NitroSniper_entry_default = register({ "id": "mime.nitrosniper", "name": "NitroSniper", "description": "Process new gift links with a deduplicated queue and visible results.", "version": "2.4.1", "authors": [{ "name": "neoarz", "id": "218675193592283137" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NitroSniper" }, NitroSniper);
+  var NitroSniper_entry_default = register({ "id": "mime.nitrosniper", "name": "NitroSniper", "description": "Process new gift links with a deduplicated queue, visible results and automated hCaptcha solving.", "version": "2.4.2", "authors": [{ "name": "neoarz", "id": "218675193592283137" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NitroSniper" }, NitroSniper);
   return __toCommonJS(NitroSniper_entry_exports);
 })();
