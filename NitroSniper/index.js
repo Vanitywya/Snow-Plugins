@@ -640,30 +640,37 @@ var plugin = (() => {
     '</head><body style="margin:0">',
     '<div id="box" style="position:fixed;left:0;top:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center"></div>',
     "<script>",
-    "var widgetId = null;",
+    "var widgetId = null, rqdata = null;",
     "function post(type, data) {",
     "  var payload = Object.assign({ type: type }, data || {});",
     "  try { window.ReactNativeWebView.postMessage(JSON.stringify(payload)); } catch (e) {}",
     "}",
     'post("ready", { apiReady: !!window.__apiReady });',
-    "window.solveCaptcha = function (sk) {",
+    "window.solveCaptcha = function (sk, rq) {",
     "  try {",
+    "    rqdata = rq || null;",
+    "    if (window.hcaptcha && window.hcaptcha.setRqdata && rqdata) { try { hcaptcha.setRqdata(rqdata); } catch (e) {} }",
     "    if (widgetId !== null) { try { hcaptcha.reset(widgetId); } catch (e) {} }",
-    '    else widgetId = hcaptcha.render("box", {',
-    "      sitekey: sk,",
-    '      size: "invisible",',
-    '      callback: function (token) { post("token", { token: token }); },',
-    '      "error-callback": function (err) { post("error", { message: String(err) }); },',
-    '      "expired-callback": function () { post("error", { message: "captcha expired" }); },',
-    '      "chalexpired-callback": function () { post("error", { message: "challenge expired" }); },',
-    '      "open-callback": function () { post("challenge_opened", {}); },',
-    '      "close-callback": function () { post("challenge_closed", {}); }',
-    "    });",
+    "    else {",
+    "      var opts = {",
+    "        sitekey: sk,",
+    '        size: "invisible",',
+    '        callback: function (token) { post("token", { token: token }); },',
+    '        "error-callback": function (err) { post("error", { message: String(err) }); },',
+    '        "expired-callback": function () { post("error", { message: "captcha expired" }); },',
+    '        "chalexpired-callback": function () { post("error", { message: "challenge expired" }); },',
+    '        "open-callback": function () { post("challenge_opened", {}); },',
+    '        "close-callback": function () { post("challenge_closed", {}); }',
+    "      };",
+    "      if (rqdata) opts.rqdata = rqdata;",
+    '      widgetId = hcaptcha.render("box", opts);',
+    "    }",
     "    hcaptcha.execute(widgetId);",
     '  } catch (e) { post("error", { message: String(e && e.message || e) }); }',
     "};",
     "</script></body></html>"
   ].join("");
+  var DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
   var SOLVER_TIMEOUT = 6e4;
   var MAX_AUTO_RETRY = 3;
   function createCaptchaSolver(r, React) {
@@ -704,9 +711,9 @@ var plugin = (() => {
       if (!token || typeof token !== "string") throw new Error("solver endpoint returned no token");
       return token;
     }
-    function solve(sitekey) {
+    function solve(sitekey, rqtoken) {
       return new Promise((resolvePromise, rejectPromise) => {
-        const p = { pending: true, resolvePromise, rejectPromise, sitekey, id: ++requestId };
+        const p = { pending: true, resolvePromise, rejectPromise, sitekey, rqtoken: rqtoken || null, id: ++requestId };
         const settle = (ok, value) => {
           if (p.pending) {
             p.pending = false;
@@ -780,13 +787,18 @@ var plugin = (() => {
     function element() {
       if (!pending || !pending.pending || !WebView || !React) return null;
       const sitekey = String(pending.sitekey || "");
-      const inject = "if (window.solveCaptcha) { window.solveCaptcha(" + JSON.stringify(sitekey) + "); } else { setTimeout(function () { window.solveCaptcha && window.solveCaptcha(" + JSON.stringify(sitekey) + "); }, 1500); }";
+      const rq = pending.rqtoken ? JSON.stringify(pending.rqtoken) : "null";
+      const inject = "if (window.solveCaptcha) { window.solveCaptcha(" + JSON.stringify(sitekey) + ", " + rq + "); } else { setTimeout(function () { window.solveCaptcha && window.solveCaptcha(" + JSON.stringify(sitekey) + ", " + rq + "); }, 1500); }";
       return React.createElement(WebView, {
         key: `captcha-${pending.id}-${epoch}`,
         source: { html: CAPTCHA_HTML, baseUrl: "https://discord.com" },
         originWhitelist: ["*"],
         javaScriptEnabled: true,
         domStorageEnabled: true,
+        // Desktop UA makes hCaptcha serve the invisible desktop flow instead
+        // of the mobile TouchUI interstitial, so execute() can pass passively.
+        userAgent: DESKTOP_UA,
+        applicationUserAgent: DESKTOP_UA,
         style: { height: "100%", width: "100%" },
         injectedJavaScript: inject,
         onMessage: (event) => handleMessage(event?.nativeEvent?.data)
@@ -896,6 +908,7 @@ var plugin = (() => {
           r.toast("Claiming gift\u2026", "GiftIcon");
           armAutoPress();
           try {
+            let nativeCap = null;
             const nativeActions = r.find("redeemGiftCode");
             if (typeof nativeActions?.redeemGiftCode === "function") {
               try {
@@ -905,8 +918,8 @@ var plugin = (() => {
                   result = "Gift claimed (native)";
                 }
               } catch (nativeError) {
-                const cap = captchaErrorInfo(nativeError);
-                if (!cap && nativeError?.status !== 429 && !/timed out/.test(nativeError?.message || "")) throw nativeError;
+                nativeCap = captchaErrorInfo(nativeError);
+                if (!nativeCap && nativeError?.status !== 429 && !/timed out/.test(nativeError?.message || "")) throw nativeError;
               }
             }
             if (!success) {
@@ -921,12 +934,12 @@ var plugin = (() => {
                   await r.discord(`/entitlements/gift-codes/${item.code}/redeem`, { method: "POST", body: JSON.stringify(payload) });
                   break;
                 } catch (e) {
-                  const cap = !captchaKey && captchaErrorInfo(e);
+                  const cap = !captchaKey && (captchaErrorInfo(e) || nativeCap);
                   if (cap && cap.sitekey && cap.service === "hcaptcha") {
                     r.toast("Solving captcha\u2026", "ShieldIcon");
                     stats.lastResult = "Solving hCaptcha\u2026";
                     r.changed();
-                    const token = await solver.solve(cap.sitekey);
+                    const token = await solver.solve(cap.sitekey, cap.rqtoken);
                     captchaKey = token;
                     captchaRqtoken = cap.rqtoken;
                     attempt--;
@@ -1052,6 +1065,6 @@ var plugin = (() => {
   NitroSniper.defaults = { ignoreOwnGiftLinks: false, webhookUrl: "", captchaSolverUrl: "" };
 
   // NitroSniper.entry.js
-  var NitroSniper_entry_default = register({ "id": "mime.nitrosniper", "name": "NitroSniper", "description": "Process new gift links with a deduplicated queue, visible results, automated Accept-button press and hCaptcha solving.", "version": "2.4.3", "authors": [{ "name": "neoarz", "id": "218675193592283137" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NitroSniper" }, NitroSniper);
+  var NitroSniper_entry_default = register({ "id": "mime.nitrosniper", "name": "NitroSniper", "description": "Process new gift links with a deduplicated queue, visible results, automated Accept-button press and hCaptcha solving.", "version": "2.4.4", "authors": [{ "name": "neoarz", "id": "218675193592283137" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NitroSniper" }, NitroSniper);
   return __toCommonJS(NitroSniper_entry_exports);
 })();

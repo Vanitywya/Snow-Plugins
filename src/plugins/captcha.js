@@ -23,30 +23,41 @@ const CAPTCHA_HTML = [
     '</head><body style="margin:0">',
     '<div id="box" style="position:fixed;left:0;top:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center"></div>',
     '<script>',
-    'var widgetId = null;',
+    'var widgetId = null, rqdata = null;',
     'function post(type, data) {',
     '  var payload = Object.assign({ type: type }, data || {});',
     '  try { window.ReactNativeWebView.postMessage(JSON.stringify(payload)); } catch (e) {}',
     '}',
     'post("ready", { apiReady: !!window.__apiReady });',
-    'window.solveCaptcha = function (sk) {',
+    'window.solveCaptcha = function (sk, rq) {',
     '  try {',
+    '    rqdata = rq || null;',
+    '    if (window.hcaptcha && window.hcaptcha.setRqdata && rqdata) { try { hcaptcha.setRqdata(rqdata); } catch (e) {} }',
     '    if (widgetId !== null) { try { hcaptcha.reset(widgetId); } catch (e) {} }',
-    '    else widgetId = hcaptcha.render("box", {',
-    '      sitekey: sk,',
-    '      size: "invisible",',
-    '      callback: function (token) { post("token", { token: token }); },',
-    '      "error-callback": function (err) { post("error", { message: String(err) }); },',
-    '      "expired-callback": function () { post("error", { message: "captcha expired" }); },',
-    '      "chalexpired-callback": function () { post("error", { message: "challenge expired" }); },',
-    '      "open-callback": function () { post("challenge_opened", {}); },',
-    '      "close-callback": function () { post("challenge_closed", {}); }',
-    '    });',
+    '    else {',
+    '      var opts = {',
+    '        sitekey: sk,',
+    '        size: "invisible",',
+    '        callback: function (token) { post("token", { token: token }); },',
+    '        "error-callback": function (err) { post("error", { message: String(err) }); },',
+    '        "expired-callback": function () { post("error", { message: "captcha expired" }); },',
+    '        "chalexpired-callback": function () { post("error", { message: "challenge expired" }); },',
+    '        "open-callback": function () { post("challenge_opened", {}); },',
+    '        "close-callback": function () { post("challenge_closed", {}); }',
+    '      };',
+    '      if (rqdata) opts.rqdata = rqdata;',
+    '      widgetId = hcaptcha.render("box", opts);',
+    '    }',
     '    hcaptcha.execute(widgetId);',
     '  } catch (e) { post("error", { message: String(e && e.message || e) }); }',
     '};',
     '<\/script></body></html>',
 ].join('');
+
+// Desktop UA: hCaptcha serves the invisible desktop flow instead of the
+// mobile TouchUI interstitial ("Are you a human?" + Confirm button), so
+// hcaptcha.execute() can pass passively with no tap required.
+const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 
 const SOLVER_TIMEOUT = 60000;
 const MAX_AUTO_RETRY = 3;
@@ -93,9 +104,9 @@ export function createCaptchaSolver(r, React) {
         return token;
     }
 
-    function solve(sitekey) {
+    function solve(sitekey, rqtoken) {
         return new Promise((resolvePromise, rejectPromise) => {
-            const p = { pending: true, resolvePromise, rejectPromise, sitekey, id: ++requestId };
+            const p = { pending: true, resolvePromise, rejectPromise, sitekey, rqtoken: rqtoken || null, id: ++requestId };
             const settle = (ok, value) => { if (p.pending) { p.pending = false; ok ? p.resolvePromise(value) : p.rejectPromise(value); } };
 
             // Prefer an external solver when configured: fully automated redemption.
@@ -157,13 +168,18 @@ export function createCaptchaSolver(r, React) {
     function element() {
         if (!pending || !pending.pending || !WebView || !React) return null;
         const sitekey = String(pending.sitekey || '');
-        const inject = 'if (window.solveCaptcha) { window.solveCaptcha(' + JSON.stringify(sitekey) + '); } else { setTimeout(function () { window.solveCaptcha && window.solveCaptcha(' + JSON.stringify(sitekey) + '); }, 1500); }';
+        const rq = pending.rqtoken ? JSON.stringify(pending.rqtoken) : 'null';
+        const inject = 'if (window.solveCaptcha) { window.solveCaptcha(' + JSON.stringify(sitekey) + ', ' + rq + '); } else { setTimeout(function () { window.solveCaptcha && window.solveCaptcha(' + JSON.stringify(sitekey) + ', ' + rq + '); }, 1500); }';
         return React.createElement(WebView, {
             key: `captcha-${pending.id}-${epoch}`,
             source: { html: CAPTCHA_HTML, baseUrl: 'https://discord.com' },
             originWhitelist: ['*'],
             javaScriptEnabled: true,
             domStorageEnabled: true,
+            // Desktop UA makes hCaptcha serve the invisible desktop flow instead
+            // of the mobile TouchUI interstitial, so execute() can pass passively.
+            userAgent: DESKTOP_UA,
+            applicationUserAgent: DESKTOP_UA,
             style: { height: '100%', width: '100%' },
             injectedJavaScript: inject,
             onMessage: (event) => handleMessage(event?.nativeEvent?.data),

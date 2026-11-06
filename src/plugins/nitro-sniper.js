@@ -80,6 +80,7 @@ export default function NitroSniper(r) {
                     // does (GiftActions.redeemGiftCode, captcha and all). Availability
                     // is probed synchronously so the REST ladder stays sync-entry when
                     // the module is absent. One shot per item; REST takes over on failure.
+                    let nativeCap = null;
                     const nativeActions = r.find('redeemGiftCode');
                     if (typeof nativeActions?.redeemGiftCode === 'function') {
                         try {
@@ -88,8 +89,8 @@ export default function NitroSniper(r) {
                         } catch (nativeError) {
                             // Captcha and rate-limit responses fall through to the REST
                             // ladder; hard failures (invalid/already-redeemed) abort here.
-                            const cap = captchaErrorInfo(nativeError);
-                            if (!cap && nativeError?.status !== 429 && !/timed out/.test(nativeError?.message || '')) throw nativeError;
+                            nativeCap = captchaErrorInfo(nativeError);
+                            if (!nativeCap && nativeError?.status !== 429 && !/timed out/.test(nativeError?.message || '')) throw nativeError;
                         }
                     }
                     if (!success) {
@@ -104,11 +105,11 @@ export default function NitroSniper(r) {
                             await r.discord(`/entitlements/gift-codes/${item.code}/redeem`, { method: 'POST', body: JSON.stringify(payload) }); break;
                         }
                         catch (e) {
-                            const cap = !captchaKey && captchaErrorInfo(e);
+                            const cap = !captchaKey && (captchaErrorInfo(e) || nativeCap);
                             if (cap && cap.sitekey && cap.service === 'hcaptcha') {
                                 r.toast('Solving captcha…', 'ShieldIcon');
                                 stats.lastResult = 'Solving hCaptcha…'; r.changed();
-                                const token = await solver.solve(cap.sitekey);
+                                const token = await solver.solve(cap.sitekey, cap.rqtoken);
                                 captchaKey = token;
                                 captchaRqtoken = cap.rqtoken;
                                 attempt--; // don't consume attempts on the captcha round-trip

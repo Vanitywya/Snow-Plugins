@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.nitrosniper",
-  "version": "2.4.3",
+  "version": "2.4.4",
   "display": {
     "name": "NitroSniper",
     "description": "Process new gift links with a deduplicated queue, visible results, automated Accept-button press and hCaptcha solving.",
