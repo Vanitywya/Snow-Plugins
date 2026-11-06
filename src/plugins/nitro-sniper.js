@@ -15,6 +15,51 @@ export default function NitroSniper(r) {
     const solver = createCaptchaSolver(r, React);
     const seen = new Map(), queue = [];
     let running = false, stopped = false, started = Date.now(), waitTimer, releaseWait;
+
+    // --- Native Accept-button automation -------------------------------------
+    // The gift sheet's bottom Accept/Redeem button calls GiftActions.redeemGiftCode.
+    // We invoke that handler directly (no tap simulation needed) and, if the sheet
+    // is already on screen, auto-press matching buttons ourselves.
+    const ACCEPT_BUTTON_RE = /^(accept|redeem(?: now)?|claim|get nitro)\b/i;
+    const autoPress = { armedUntil: 0, fired: false };
+    function armAutoPress() { autoPress.armedUntil = Date.now() + 15000; autoPress.fired = false; }
+    r.patch('after', React, 'createElement', (args, result) => {
+        if (!r.active || stopped || autoPress.fired || Date.now() > autoPress.armedUntil) return result;
+        const props = args && args[1];
+        const label = String(props?.accessibilityLabel ?? props?.label ?? props?.text ?? '');
+        if (typeof props?.onPress !== 'function' || !ACCEPT_BUTTON_RE.test(label)) return result;
+        autoPress.fired = true;
+        const press = props.onPress;
+        setTimeout(() => { if (r.active && !stopped) { try { press({}); } catch { /* sheet may have closed */ } } }, 350);
+        return result;
+    });
+
+    function redeemViaActions(actions, code) {
+        // Calls the same module the native Accept button uses. Returns null when
+        // the module is unavailable (REST ladder takes over); rejects on real
+        // outcomes so callers can distinguish claimed from failed.
+        if (typeof actions?.redeemGiftCode !== 'function') return Promise.resolve(null);
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const timer = setTimeout(() => { if (!settled) { settled = true; reject(new Error('native redeem timed out')); } }, 20000);
+            const done = ok => value => {
+                if (settled) return;
+                settled = true; clearTimeout(timer);
+                if (ok) resolve();
+                else {
+                    const e = value instanceof Error ? value : new Error(value?.message || 'native redeem failed');
+                    if (value && typeof value === 'object') e.body = value.body || value;
+                    reject(e);
+                }
+            };
+            try { actions.redeemGiftCode({ code, onRedeemed: done(true), onError: done(false) }); }
+            catch (e) {
+                const err = e instanceof Error ? e : new Error(String(e));
+                if (/not a function|undefined|null/.test(err.message)) resolve(null);
+                else { settled = true; clearTimeout(timer); reject(err); }
+            }
+        });
+    }
     const stats = { queued: 0, claimed: 0, failed: 0, lastResult: 'Waiting for new gift links' };
     function wait(ms) { return new Promise(resolve => { releaseWait = resolve; waitTimer = setTimeout(resolve, ms); }); }
     async function webhook(payload) {
@@ -29,8 +74,25 @@ export default function NitroSniper(r) {
                 const item = queue.shift();
                 let success = false, result = '', giftType;
                 r.toast('Claiming gift…', 'GiftIcon');
+                armAutoPress();
                 try {
-                    // A single request path; never retry an uncertain timeout or run a second callback API.
+                    // Native path first: exactly what pressing the bottom Accept button
+                    // does (GiftActions.redeemGiftCode, captcha and all). Availability
+                    // is probed synchronously so the REST ladder stays sync-entry when
+                    // the module is absent. One shot per item; REST takes over on failure.
+                    const nativeActions = r.find('redeemGiftCode');
+                    if (typeof nativeActions?.redeemGiftCode === 'function') {
+                        try {
+                            const native = await redeemViaActions(nativeActions, item.code);
+                            if (native !== null) { success = true; result = 'Gift claimed (native)'; }
+                        } catch (nativeError) {
+                            // Captcha and rate-limit responses fall through to the REST
+                            // ladder; hard failures (invalid/already-redeemed) abort here.
+                            const cap = captchaErrorInfo(nativeError);
+                            if (!cap && nativeError?.status !== 429 && !/timed out/.test(nativeError?.message || '')) throw nativeError;
+                        }
+                    }
+                    if (!success) {
                     let captchaKey, captchaRqtoken;
                     for (let attempt = 0; ; attempt++) {
                         try {
@@ -59,6 +121,7 @@ export default function NitroSniper(r) {
                         }
                     }
                     success = true; result = 'Gift claimed';
+                    }
                 } catch (e) { result = `Claim failed: ${e.message}`; }
                 if (stopped || !r.active) return;
                 stats[success ? 'claimed' : 'failed']++; stats.lastResult = result; r.changed();

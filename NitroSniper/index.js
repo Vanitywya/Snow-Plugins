@@ -818,6 +818,63 @@ var plugin = (() => {
     const solver = createCaptchaSolver(r, React);
     const seen = /* @__PURE__ */ new Map(), queue = [];
     let running = false, stopped = false, started = Date.now(), waitTimer, releaseWait;
+    const ACCEPT_BUTTON_RE = /^(accept|redeem(?: now)?|claim|get nitro)\b/i;
+    const autoPress = { armedUntil: 0, fired: false };
+    function armAutoPress() {
+      autoPress.armedUntil = Date.now() + 15e3;
+      autoPress.fired = false;
+    }
+    r.patch("after", React, "createElement", (args, result) => {
+      if (!r.active || stopped || autoPress.fired || Date.now() > autoPress.armedUntil) return result;
+      const props = args && args[1];
+      const label = String(props?.accessibilityLabel ?? props?.label ?? props?.text ?? "");
+      if (typeof props?.onPress !== "function" || !ACCEPT_BUTTON_RE.test(label)) return result;
+      autoPress.fired = true;
+      const press = props.onPress;
+      setTimeout(() => {
+        if (r.active && !stopped) {
+          try {
+            press({});
+          } catch {
+          }
+        }
+      }, 350);
+      return result;
+    });
+    function redeemViaActions(actions, code) {
+      if (typeof actions?.redeemGiftCode !== "function") return Promise.resolve(null);
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            reject(new Error("native redeem timed out"));
+          }
+        }, 2e4);
+        const done = (ok) => (value) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (ok) resolve();
+          else {
+            const e = value instanceof Error ? value : new Error(value?.message || "native redeem failed");
+            if (value && typeof value === "object") e.body = value.body || value;
+            reject(e);
+          }
+        };
+        try {
+          actions.redeemGiftCode({ code, onRedeemed: done(true), onError: done(false) });
+        } catch (e) {
+          const err = e instanceof Error ? e : new Error(String(e));
+          if (/not a function|undefined|null/.test(err.message)) resolve(null);
+          else {
+            settled = true;
+            clearTimeout(timer);
+            reject(err);
+          }
+        }
+      });
+    }
     const stats = { queued: 0, claimed: 0, failed: 0, lastResult: "Waiting for new gift links" };
     function wait(ms) {
       return new Promise((resolve) => {
@@ -837,38 +894,54 @@ var plugin = (() => {
           const item = queue.shift();
           let success = false, result = "", giftType;
           r.toast("Claiming gift\u2026", "GiftIcon");
+          armAutoPress();
           try {
-            let captchaKey, captchaRqtoken;
-            for (let attempt = 0; ; attempt++) {
+            const nativeActions = r.find("redeemGiftCode");
+            if (typeof nativeActions?.redeemGiftCode === "function") {
               try {
-                const payload = { channel_id: item.channelId || null };
-                if (captchaKey) {
-                  payload.captcha_key = captchaKey;
-                  if (captchaRqtoken) payload.captcha_rqtoken = captchaRqtoken;
+                const native = await redeemViaActions(nativeActions, item.code);
+                if (native !== null) {
+                  success = true;
+                  result = "Gift claimed (native)";
                 }
-                await r.discord(`/entitlements/gift-codes/${item.code}/redeem`, { method: "POST", body: JSON.stringify(payload) });
-                break;
-              } catch (e) {
-                const cap = !captchaKey && captchaErrorInfo(e);
-                if (cap && cap.sitekey && cap.service === "hcaptcha") {
-                  r.toast("Solving captcha\u2026", "ShieldIcon");
-                  stats.lastResult = "Solving hCaptcha\u2026";
-                  r.changed();
-                  const token = await solver.solve(cap.sitekey);
-                  captchaKey = token;
-                  captchaRqtoken = cap.rqtoken;
-                  attempt--;
-                  continue;
-                }
-                if (e.status !== 429 || attempt >= 2 || e.retryAfter <= 0 || e.retryAfter > 120) throw e;
-                stats.lastResult = `Rate limited; retrying in ${Math.ceil(e.retryAfter)}s`;
-                r.changed();
-                await wait(e.retryAfter * 1e3 + 100);
-                if (stopped || !r.active) return;
+              } catch (nativeError) {
+                const cap = captchaErrorInfo(nativeError);
+                if (!cap && nativeError?.status !== 429 && !/timed out/.test(nativeError?.message || "")) throw nativeError;
               }
             }
-            success = true;
-            result = "Gift claimed";
+            if (!success) {
+              let captchaKey, captchaRqtoken;
+              for (let attempt = 0; ; attempt++) {
+                try {
+                  const payload = { channel_id: item.channelId || null };
+                  if (captchaKey) {
+                    payload.captcha_key = captchaKey;
+                    if (captchaRqtoken) payload.captcha_rqtoken = captchaRqtoken;
+                  }
+                  await r.discord(`/entitlements/gift-codes/${item.code}/redeem`, { method: "POST", body: JSON.stringify(payload) });
+                  break;
+                } catch (e) {
+                  const cap = !captchaKey && captchaErrorInfo(e);
+                  if (cap && cap.sitekey && cap.service === "hcaptcha") {
+                    r.toast("Solving captcha\u2026", "ShieldIcon");
+                    stats.lastResult = "Solving hCaptcha\u2026";
+                    r.changed();
+                    const token = await solver.solve(cap.sitekey);
+                    captchaKey = token;
+                    captchaRqtoken = cap.rqtoken;
+                    attempt--;
+                    continue;
+                  }
+                  if (e.status !== 429 || attempt >= 2 || e.retryAfter <= 0 || e.retryAfter > 120) throw e;
+                  stats.lastResult = `Rate limited; retrying in ${Math.ceil(e.retryAfter)}s`;
+                  r.changed();
+                  await wait(e.retryAfter * 1e3 + 100);
+                  if (stopped || !r.active) return;
+                }
+              }
+              success = true;
+              result = "Gift claimed";
+            }
           } catch (e) {
             result = `Claim failed: ${e.message}`;
           }
@@ -979,6 +1052,6 @@ var plugin = (() => {
   NitroSniper.defaults = { ignoreOwnGiftLinks: false, webhookUrl: "", captchaSolverUrl: "" };
 
   // NitroSniper.entry.js
-  var NitroSniper_entry_default = register({ "id": "mime.nitrosniper", "name": "NitroSniper", "description": "Process new gift links with a deduplicated queue, visible results and automated hCaptcha solving.", "version": "2.4.2", "authors": [{ "name": "neoarz", "id": "218675193592283137" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NitroSniper" }, NitroSniper);
+  var NitroSniper_entry_default = register({ "id": "mime.nitrosniper", "name": "NitroSniper", "description": "Process new gift links with a deduplicated queue, visible results, automated Accept-button press and hCaptcha solving.", "version": "2.4.3", "authors": [{ "name": "neoarz", "id": "218675193592283137" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NitroSniper" }, NitroSniper);
   return __toCommonJS(NitroSniper_entry_exports);
 })();

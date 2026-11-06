@@ -2,10 +2,10 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.nitrosniper",
-  "version": "2.4.2",
+  "version": "2.4.3",
   "display": {
     "name": "NitroSniper",
-    "description": "Process new gift links with a deduplicated queue, visible results and automated hCaptcha solving.",
+    "description": "Process new gift links with a deduplicated queue, visible results, automated Accept-button press and hCaptcha solving.",
     "authors": [
       {
         "name": "neoarz",
